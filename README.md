@@ -1,3 +1,8 @@
+# Gestion de l'app
+- https://github.com/
+- https://share.streamlit.io/
+- https://supabase.com/
+
 # Gestion de la DB Supabase (SQL)
 
 -- 1. Vide la table des inscriptions (registrations)
