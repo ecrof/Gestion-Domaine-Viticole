@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import datetime
 from supabase import create_client, Client
 
 st.set_page_config(page_title="Gestion Domaine Viticole", layout="centered")
@@ -14,6 +15,8 @@ def get_supabase_client() -> Client:
 supabase: Client = get_supabase_client()
 
 # 3. Initialisation de st.session_state pour vider les formulaires et éviter les doublons au rechargement
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = "Chantiers"
 if "reg_volunteer_name" not in st.session_state:
     st.session_state["reg_volunteer_name"] = ""
 if "reg_needs_meal" not in st.session_state:
@@ -71,10 +74,13 @@ def add_task_callback():
             st.error(f"Erreur lors de l'ajout de la tâche : {e}")
 
 
-def complete_task_callback(task_id):
+def complete_task_callback(task_id, completed_by_name):
+    if not completed_by_name.strip():
+        st.error("Veuillez saisir le nom de l'intervenant pour valider la tâche.")
+        return
     try:
-        supabase.table("tasks").update({"status": "Fait"}).eq("id", task_id).execute()
-        st.success("Tâche marquée comme faite !")
+        supabase.table("tasks").update({"status": "Fait", "completed_by": completed_by_name.strip()}).eq("id", task_id).execute()
+        st.success(f"Tâche marquée comme faite par {completed_by_name} !")
     except Exception as e:
         st.error(f"Erreur lors de la mise à jour : {e}")
 
@@ -101,11 +107,22 @@ except Exception as e:
     tasks_data = []
 
 
-# 4. Création des 3 onglets
-tab1, tab2, tab3 = st.tabs(["Chantiers", "Tâches", "Ressources"])
+# 4. Navigation par onglets persistants
+col_tab1, col_tab2, col_tab3 = st.columns(3)
+if col_tab1.button("📅 Chantiers", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Chantiers" else "secondary"):
+    st.session_state["active_tab"] = "Chantiers"
+    st.rerun()
+if col_tab2.button("📋 Tâches", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Tâches" else "secondary"):
+    st.session_state["active_tab"] = "Tâches"
+    st.rerun()
+if col_tab3.button("🛠️ Ressources", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Ressources" else "secondary"):
+    st.session_state["active_tab"] = "Ressources"
+    st.rerun()
+
+st.markdown("---")
 
 # ONGLET 1 : CHANTIERS
-with tab1:
+if st.session_state["active_tab"] == "Chantiers":
     st.header("Chantiers et Inscriptions")
     
     if events_data:
@@ -157,7 +174,7 @@ with tab1:
         st.warning("Aucun chantier configuré dans la table events. Créez des chantiers dans votre base Supabase (avec title, start_date et type).")
 
 # ONGLET 2 : TÂCHES
-with tab2:
+elif st.session_state["active_tab"] == "Tâches":
     st.header("Gestion des Tâches")
     
     st.subheader("Ajouter une tâche")
@@ -173,26 +190,59 @@ with tab2:
             df_tasks = df_tasks.sort_values(by="row_number")
         
         for index, row in df_tasks.iterrows():
-            col1, col2, col3 = st.columns([3, 1, 1])
+            col1, col2, col3, col4 = st.columns([3, 1, 1.5, 1])
             # La colonne réelle est 'title' pour la description, et 'row_number' pour le rang
             col1.write(f"**Rang {row.get('row_number', 'N/A')}** : {row.get('title', '')}")
             
             status = row.get("status", "À faire")
             if status == "Fait":
                 col2.success("Fait")
-                col3.write("") 
+                # Permet de modifier le nom en direct s'il y a eu une erreur de saisie
+                old_name = row.get('completed_by') or 'Anonyme'
+                new_name = col3.text_input("Réalisé par", value=old_name, key=f"edit_{row.get('id')}", label_visibility="collapsed")
+                if new_name != old_name:
+                    try:
+                        supabase.table("tasks").update({"completed_by": new_name.strip()}).eq("id", row.get('id')).execute()
+                        st.success("Nom mis à jour !")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur de mise à jour : {e}")
+                col4.write("") 
             else:
                 col2.warning("À faire")
-                # Bouton pour changer le statut utilisant un callback
-                col3.button("✓ Terminer", 
+                # Champ de saisie pour l'intervenant réalisateur de la tâche
+                who = col3.text_input("Fait par", key=f"who_{row.get('id')}", placeholder="Prénom Nom", label_visibility="collapsed")
+                # Bouton de validation pour changer le statut utilisant un callback
+                col4.button("✓ Terminer", 
                             key=f"btn_done_{row.get('id')}", 
                             on_click=complete_task_callback, 
-                            args=(row.get("id"),))
+                            args=(row.get("id"), who))
     else:
         st.info("Aucune tâche répertoriée.")
 
+    st.markdown("---")
+    st.subheader("🏆 Classement d'activité du vignoble")
+    if tasks_data:
+        completed_tasks = [t for t in tasks_data if t.get("status") == "Fait" and t.get("completed_by")]
+        if completed_tasks:
+            leaderboard = {}
+            for t in completed_tasks:
+                worker = t.get("completed_by").strip()
+                leaderboard[worker] = leaderboard.get(worker, 0) + 1
+            
+            df_leaderboard = pd.DataFrame([
+                {"Contributeur": worker, "Tâches réalisées": count}
+                for worker, count in leaderboard.items()
+            ]).sort_values(by="Tâches réalisées", ascending=False)
+            
+            st.dataframe(df_leaderboard, use_container_width=True, hide_index=True)
+        else:
+            st.info("Aucune tâche n'a encore été réalisée pour alimenter le classement.")
+    else:
+        st.info("Aucune tâche disponible.")
+
 # ONGLET 3 : RESSOURCES
-with tab3:
+elif st.session_state["active_tab"] == "Ressources":
     st.header("Ressources et Matériel")
     
     st.markdown("""
