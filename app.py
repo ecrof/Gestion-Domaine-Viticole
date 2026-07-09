@@ -23,8 +23,42 @@ if "reg_needs_meal" not in st.session_state:
     st.session_state["reg_needs_meal"] = False
 if "task_title" not in st.session_state:
     st.session_state["task_title"] = ""
-if "task_row_number" not in st.session_state:
-    st.session_state["task_row_number"] = 1
+if "task_row_range" not in st.session_state:
+    st.session_state["task_row_range"] = "1"
+
+
+def parse_ranges(range_str: str):
+    """
+    Parse une chaîne de caractères représentant des rangs (ex: "1, 3-5, 7-9, 13")
+    et retourne la liste triée des numéros de rangs uniques (bornés de 1 à 40).
+    """
+    rows = set()
+    parts = range_str.replace(" ", "").split(",")
+    for part in parts:
+        if not part:
+            continue
+        if "-" in part:
+            subparts = part.split("-")
+            if len(subparts) == 2:
+                try:
+                    start = int(subparts[0])
+                    end = int(subparts[1])
+                    start = max(1, min(40, start))
+                    end = max(1, min(40, end))
+                    if start <= end:
+                        rows.update(range(start, end + 1))
+                    else:
+                        rows.update(range(end, start + 1))
+                except ValueError:
+                    pass
+        else:
+            try:
+                val = int(part)
+                val = max(1, min(40, val))
+                rows.add(val)
+            except ValueError:
+                pass
+    return sorted(list(rows))
 
 
 def add_registration_callback():
@@ -53,25 +87,33 @@ def add_registration_callback():
 
 def add_task_callback():
     title = st.session_state.get("task_title", "").strip()
-    row = st.session_state.get("task_row_number", 1)
+    range_str = st.session_state.get("task_row_range", "1").strip()
     
     if not title:
         st.error("Veuillez saisir la description de la tâche.")
         return
     
-    if title:
-        try:
-            supabase.table("tasks").insert({
+    row_numbers = parse_ranges(range_str)
+    if not row_numbers:
+        st.error("Aucun numéro de rang valide n'a été détecté (ex: 1, 3-5, 7).")
+        return
+    
+    try:
+        payloads = [
+            {
                 "title": title,
-                "row_number": row,
+                "row_number": row_num,
                 "status": "À faire"
-            }).execute()
-            st.success("Tâche ajoutée avec succès !")
-            # Réinitialisation des champs du formulaire
-            st.session_state.task_title = ""
-            st.session_state.task_row_number = 1
-        except Exception as e:
-            st.error(f"Erreur lors de l'ajout de la tâche : {e}")
+            }
+            for row_num in row_numbers
+        ]
+        supabase.table("tasks").insert(payloads).execute()
+        st.success(f"{len(row_numbers)} tâche(s) ajoutée(s) avec succès pour les rangs {row_numbers} !")
+        # Réinitialisation des champs du formulaire
+        st.session_state.task_title = ""
+        st.session_state.task_row_range = "1"
+    except Exception as e:
+        st.error(f"Erreur lors de l'ajout des tâches : {e}")
 
 
 def complete_task_callback(task_id, completed_by_name):
@@ -128,7 +170,7 @@ if st.session_state["active_tab"] == "Tâches":
     st.subheader("Ajouter une tâche")
     with st.form("task_form"):
         st.text_input("Description de la tâche", key="task_title")
-        st.number_input("Numéro de rang (1-40)", min_value=1, max_value=40, step=1, key="task_row_number")
+        st.text_input("Numéro(s) de rang (ex: 1, 3-5, 7-9, 13)", key="task_row_range", help="Saisissez des numéros uniques séparés par des virgules ou des plages de numéros avec des tirets.")
         st.form_submit_button("Ajouter", on_click=add_task_callback)
         
     st.subheader("Liste des tâches")
@@ -146,13 +188,27 @@ if st.session_state["active_tab"] == "Tâches":
                 df_todo = df_todo.sort_values(by="row_number")
             
             for index, row in df_todo.iterrows():
-                col1, col2, col3, col4 = st.columns([3, 1, 1.5, 1])
-                col1.write(f"**Rang {row.get('row_number', 'N/A')}** : {row.get('title', '')}")
-                col2.warning("À faire")
+                col_rang_lbl, col_rang_val, col_desc, col_status, col_who, col_btn = st.columns([0.6, 1.0, 2.5, 1, 1.5, 1])
+                
+                col_rang_lbl.markdown("<div style='padding-top: 5px; font-weight: bold;'>Rang</div>", unsafe_allow_html=True)
+                # Saisie modifiable du numéro de rang
+                raw_row_num = row.get('row_number')
+                old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
+                new_row_num = col_rang_val.number_input("Rang", min_value=1, max_value=40, value=old_row_num, key=f"row_num_todo_{row.get('id')}", label_visibility="collapsed")
+                if new_row_num != old_row_num:
+                    try:
+                        supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
+                        st.success("Rang mis à jour !")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur de modification du rang : {e}")
+                
+                col_desc.write(row.get('title', ''))
+                col_status.warning("À faire")
                 # Champ de saisie pour l'intervenant réalisateur de la tâche
-                who = col3.text_input("Fait par", key=f"who_{row.get('id')}", placeholder="Prénom Nom", label_visibility="collapsed")
+                who = col_who.text_input("Fait par", key=f"who_{row.get('id')}", placeholder="Prénom Nom", label_visibility="collapsed")
                 # Bouton de validation pour changer le statut utilisant un callback
-                col4.button("✓ Terminer", 
+                col_btn.button("✓ Fait", 
                             key=f"btn_done_{row.get('id')}", 
                             on_click=complete_task_callback, 
                             args=(row.get("id"), who))
@@ -167,12 +223,26 @@ if st.session_state["active_tab"] == "Tâches":
             df_done_limited = df_done.head(10)
             
             for index, row in df_done_limited.iterrows():
-                col1, col2, col3, col4 = st.columns([3, 1, 1.5, 1])
-                col1.write(f"**Rang {row.get('row_number', 'N/A')}** : {row.get('title', '')}")
-                col2.success("Fait")
+                col_rang_lbl, col_rang_val, col_desc, col_status, col_who, col_btn = st.columns([0.6, 1.0, 2.5, 1, 1.5, 1])
+                
+                col_rang_lbl.markdown("<div style='padding-top: 5px; font-weight: bold;'>Rang</div>", unsafe_allow_html=True)
+                # Saisie modifiable du numéro de rang même pour les tâches terminées
+                raw_row_num = row.get('row_number')
+                old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
+                new_row_num = col_rang_val.number_input("Rang", min_value=1, max_value=40, value=old_row_num, key=f"row_num_done_{row.get('id')}", label_visibility="collapsed")
+                if new_row_num != old_row_num:
+                    try:
+                        supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
+                        st.success("Rang mis à jour !")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur de modification du rang : {e}")
+                
+                col_desc.write(row.get('title', ''))
+                col_status.success("Fait")
                 # Permet de modifier le nom en direct s'il y a eu une erreur de saisie
                 old_name = row.get('completed_by') or 'Anonyme'
-                new_name = col3.text_input("Réalisé par", value=old_name, key=f"edit_{row.get('id')}", label_visibility="collapsed")
+                new_name = col_who.text_input("Réalisé par", value=old_name, key=f"edit_{row.get('id')}", label_visibility="collapsed")
                 if new_name != old_name:
                     try:
                         supabase.table("tasks").update({"completed_by": new_name.strip()}).eq("id", row.get('id')).execute()
@@ -180,9 +250,8 @@ if st.session_state["active_tab"] == "Tâches":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erreur de mise à jour : {e}")
-                col4.write("")
-        else:
-            st.info("Aucune tâche n'a encore été marquée comme faite.")
+                col_btn.write("")
+
     else:
         st.info("Aucune tâche répertoriée.")
 
