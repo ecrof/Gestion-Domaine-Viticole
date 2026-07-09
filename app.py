@@ -109,14 +109,14 @@ except Exception as e:
 
 # 4. Navigation par onglets persistants
 col_tab1, col_tab2, col_tab3 = st.columns(3)
-if col_tab1.button("📅 Chantiers", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Chantiers" else "secondary"):
+if col_tab1.button("🛠️ Chantiers", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Chantiers" else "secondary"):
     st.session_state["active_tab"] = "Chantiers"
     st.rerun()
 if col_tab2.button("📋 Tâches", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Tâches" else "secondary"):
     st.session_state["active_tab"] = "Tâches"
     st.rerun()
-if col_tab3.button("🛠️ Ressources", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Ressources" else "secondary"):
-    st.session_state["active_tab"] = "Ressources"
+if col_tab3.button("📅 Calendrier", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Calendrier" else "secondary"):
+    st.session_state["active_tab"] = "Calendrier"
     st.rerun()
 
 st.markdown("---")
@@ -241,12 +241,9 @@ elif st.session_state["active_tab"] == "Tâches":
     else:
         st.info("Aucune tâche disponible.")
 
-# ONGLET 3 : RESSOURCES ET CALENDRIER
-elif st.session_state["active_tab"] == "Ressources":
-    st.header("Ressources et Calendrier Viticole (Belgique)")
-    
-    # L'import de datetime doit idéalement être placé en haut du fichier avec les autres imports
-    import datetime 
+# ONGLET 3 : CALENDRIER
+elif st.session_state["active_tab"] == "Calendrier":
+    st.header("Calendrier Viticole (Belgique)")
     
     # Récupération du mois en cours
     current_month = datetime.date.today().month
@@ -281,8 +278,13 @@ elif st.session_state["active_tab"] == "Ressources":
         },
         {
             "activity": "Vendanges", 
-            "months": [9, 10], 
+            "months": [8, 9, 10], 
             "tools": "Sécateur de vendange (épinette), seaux/paniers, bottes étanches, vêtements de pluie."
+        },
+        {
+            "activity": "Vinification & Soutirage", 
+            "months": [10, 11, 12], 
+            "tools": "Matériel de vinification."
         },
         {
             "activity": "Repos hivernal & Entretien du matériel", 
@@ -293,7 +295,7 @@ elif st.session_state["active_tab"] == "Ressources":
     
     # Séparation algorithmique selon le mois en cours
     current_activities = [item for item in calendar if current_month in item["months"]]
-    other_activities = [item for item in calendar if current_month not in item["months"]]
+    activities = [item for item in calendar]
     
     # Affichage dynamique conditionnel
     st.subheader("Action(s) critique(s) ce mois-ci")
@@ -310,7 +312,7 @@ elif st.session_state["active_tab"] == "Ressources":
     # Affichage statique du reste de l'année
     st.subheader("Planification annuelle")
     
-    for item in other_activities:
+    for item in activities:
         months_str = " - ".join([MONTHS_FR[m] for m in item["months"]])
         with st.expander(f"{item['activity']} ({months_str})"):
             st.write(f"**Période :** {months_str}")
