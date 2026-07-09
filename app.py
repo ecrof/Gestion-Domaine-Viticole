@@ -16,7 +16,7 @@ supabase: Client = get_supabase_client()
 
 # 3. Initialisation de st.session_state pour vider les formulaires et éviter les doublons au rechargement
 if "active_tab" not in st.session_state:
-    st.session_state["active_tab"] = "Chantiers"
+    st.session_state["active_tab"] = "Tâches"
 if "reg_volunteer_name" not in st.session_state:
     st.session_state["reg_volunteer_name"] = ""
 if "reg_needs_meal" not in st.session_state:
@@ -109,72 +109,20 @@ except Exception as e:
 
 # 4. Navigation par onglets persistants
 col_tab1, col_tab2, col_tab3 = st.columns(3)
-if col_tab1.button("🛠️ Chantiers", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Chantiers" else "secondary"):
-    st.session_state["active_tab"] = "Chantiers"
-    st.rerun()
-if col_tab2.button("📋 Tâches", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Tâches" else "secondary"):
+if col_tab1.button("📋 Tâches", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Tâches" else "secondary"):
     st.session_state["active_tab"] = "Tâches"
     st.rerun()
-if col_tab3.button("📅 Calendrier", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Calendrier" else "secondary"):
+if col_tab2.button("📅 Calendrier", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Calendrier" else "secondary"):
     st.session_state["active_tab"] = "Calendrier"
+    st.rerun()
+if col_tab3.button("🛠️ Chantiers", use_container_width=True, type="primary" if st.session_state["active_tab"] == "Chantiers" else "secondary"):
+    st.session_state["active_tab"] = "Chantiers"
     st.rerun()
 
 st.markdown("---")
 
-# ONGLET 1 : CHANTIERS
-if st.session_state["active_tab"] == "Chantiers":
-    st.header("Chantiers et Inscriptions")
-    
-    if events_data:
-        # Les événements possèdent 'title' et 'start_date' dans le schéma réel
-        event_options = {e['id']: f"{e.get('start_date', 'Sans date')} - {e.get('title', 'Chantier')}" for e in events_data}
-        
-        st.subheader("S'inscrire à un chantier")
-        with st.form("registration_form"):
-            st.selectbox("Sélectionner un chantier", 
-                         options=list(event_options.keys()), 
-                         format_func=lambda x: event_options[x], 
-                         key="reg_event")
-            st.text_input("Nom de l'intervenant", key="reg_volunteer_name")
-            st.checkbox("Repas requis (cocher si oui)", key="reg_needs_meal")
-            
-            # Utilisation du callback pour l'insertion
-            st.form_submit_button("S'inscrire", on_click=add_registration_callback)
-            
-        st.subheader("Récapitulatif des inscriptions")
-        if registrations_data:
-            df_events = pd.DataFrame(events_data)
-            df_regs = pd.DataFrame(registrations_data)
-            
-            # Filtrer les inscriptions associées à un événement valide
-            df_regs_valid = df_regs[df_regs["event_id"].notna()]
-            
-            if not df_events.empty and not df_regs_valid.empty:
-                # Jointure pour obtenir le nom de l'événement associé à l'inscription
-                df_merged = pd.merge(df_regs_valid, df_events, left_on="event_id", right_on="id", suffixes=('_reg', '_event'))
-                
-                # Tableau récapitulatif : inscrits et repas par événement (les colonnes réelles de events sont 'title' et 'start_date')
-                if "title_event" in df_merged.columns or "title" in df_merged.columns:
-                    title_col = "title_event" if "title_event" in df_merged.columns else "title"
-                    summary = df_merged.groupby(title_col).agg(
-                        Inscrits=('volunteer_name', 'count'),
-                        Repas_Prévus=('needs_meal', lambda x: int(x.fillna(False).sum()))
-                    ).reset_index().rename(columns={
-                        title_col: "Chantier",
-                        "Inscrits": "Nombre d'inscrits",
-                        "Repas_Prévus": "Repas requis"
-                    })
-                    
-                    st.dataframe(summary, use_container_width=True, hide_index=True)
-            else:
-                st.info("Aucune inscription associée à un chantier pour le moment.")
-        else:
-            st.info("Aucune inscription enregistrée dans la base de données.")
-    else:
-        st.warning("Aucun chantier configuré dans la table events. Créez des chantiers dans votre base Supabase (avec title, start_date et type).")
-
-# ONGLET 2 : TÂCHES
-elif st.session_state["active_tab"] == "Tâches":
+# ONGLET 1 : TÂCHES
+if st.session_state["active_tab"] == "Tâches":
     st.header("Gestion des Tâches")
     
     st.subheader("Ajouter une tâche")
@@ -186,16 +134,41 @@ elif st.session_state["active_tab"] == "Tâches":
     st.subheader("Liste des tâches")
     if tasks_data:
         df_tasks = pd.DataFrame(tasks_data)
-        if "row_number" in df_tasks.columns:
-            df_tasks = df_tasks.sort_values(by="row_number")
         
-        for index, row in df_tasks.iterrows():
-            col1, col2, col3, col4 = st.columns([3, 1, 1.5, 1])
-            # La colonne réelle est 'title' pour la description, et 'row_number' pour le rang
-            col1.write(f"**Rang {row.get('row_number', 'N/A')}** : {row.get('title', '')}")
+        # Séparer les tâches "À faire" et les tâches "Faites"
+        df_todo = df_tasks[df_tasks["status"] != "Fait"] if "status" in df_tasks.columns else pd.DataFrame()
+        df_done = df_tasks[df_tasks["status"] == "Fait"] if "status" in df_tasks.columns else pd.DataFrame()
+        
+        # 1. Affichage des tâches "À faire" triées par numéro de rang
+        st.markdown("### 📋 Tâches à faire")
+        if not df_todo.empty:
+            if "row_number" in df_todo.columns:
+                df_todo = df_todo.sort_values(by="row_number")
             
-            status = row.get("status", "À faire")
-            if status == "Fait":
+            for index, row in df_todo.iterrows():
+                col1, col2, col3, col4 = st.columns([3, 1, 1.5, 1])
+                col1.write(f"**Rang {row.get('row_number', 'N/A')}** : {row.get('title', '')}")
+                col2.warning("À faire")
+                # Champ de saisie pour l'intervenant réalisateur de la tâche
+                who = col3.text_input("Fait par", key=f"who_{row.get('id')}", placeholder="Prénom Nom", label_visibility="collapsed")
+                # Bouton de validation pour changer le statut utilisant un callback
+                col4.button("✓ Terminer", 
+                            key=f"btn_done_{row.get('id')}", 
+                            on_click=complete_task_callback, 
+                            args=(row.get("id"), who))
+        else:
+            st.info("Toutes les tâches ont été réalisées ! 🎉")
+            
+        # 2. Affichage des tâches "Faites" triées par date, 10 dernières uniquement
+        st.markdown("### ✅ Tâches terminées (10 dernières)")
+        if not df_done.empty:
+            if "created_at" in df_done.columns:
+                df_done = df_done.sort_values(by="created_at", ascending=False)
+            df_done_limited = df_done.head(10)
+            
+            for index, row in df_done_limited.iterrows():
+                col1, col2, col3, col4 = st.columns([3, 1, 1.5, 1])
+                col1.write(f"**Rang {row.get('row_number', 'N/A')}** : {row.get('title', '')}")
                 col2.success("Fait")
                 # Permet de modifier le nom en direct s'il y a eu une erreur de saisie
                 old_name = row.get('completed_by') or 'Anonyme'
@@ -207,16 +180,9 @@ elif st.session_state["active_tab"] == "Tâches":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erreur de mise à jour : {e}")
-                col4.write("") 
-            else:
-                col2.warning("À faire")
-                # Champ de saisie pour l'intervenant réalisateur de la tâche
-                who = col3.text_input("Fait par", key=f"who_{row.get('id')}", placeholder="Prénom Nom", label_visibility="collapsed")
-                # Bouton de validation pour changer le statut utilisant un callback
-                col4.button("✓ Terminer", 
-                            key=f"btn_done_{row.get('id')}", 
-                            on_click=complete_task_callback, 
-                            args=(row.get("id"), who))
+                col4.write("")
+        else:
+            st.info("Aucune tâche n'a encore été marquée comme faite.")
     else:
         st.info("Aucune tâche répertoriée.")
 
@@ -241,7 +207,7 @@ elif st.session_state["active_tab"] == "Tâches":
     else:
         st.info("Aucune tâche disponible.")
 
-# ONGLET 3 : CALENDRIER
+# ONGLET 2 : CALENDRIER
 elif st.session_state["active_tab"] == "Calendrier":
     st.header("Calendrier Viticole (Belgique)")
     
@@ -317,3 +283,55 @@ elif st.session_state["active_tab"] == "Calendrier":
         with st.expander(f"{item['activity']} ({months_str})"):
             st.write(f"**Période :** {months_str}")
             st.write(f"**Matériel :** {item['tools']}")
+
+# ONGLET 3 : CHANTIERS
+elif st.session_state["active_tab"] == "Chantiers":
+    st.header("Chantiers et Inscriptions")
+    
+    if events_data:
+        # Les événements possèdent 'title' et 'start_date' dans le schéma réel
+        event_options = {e['id']: f"{e.get('start_date', 'Sans date')} - {e.get('title', 'Chantier')}" for e in events_data}
+        
+        st.subheader("S'inscrire à un chantier")
+        with st.form("registration_form"):
+            st.selectbox("Sélectionner un chantier", 
+                         options=list(event_options.keys()), 
+                         format_func=lambda x: event_options[x], 
+                         key="reg_event")
+            st.text_input("Nom de l'intervenant", key="reg_volunteer_name")
+            st.checkbox("Repas requis (cocher si oui)", key="reg_needs_meal")
+            
+            # Utilisation du callback pour l'insertion
+            st.form_submit_button("S'inscrire", on_click=add_registration_callback)
+            
+        st.subheader("Récapitulatif des inscriptions")
+        if registrations_data:
+            df_events = pd.DataFrame(events_data)
+            df_regs = pd.DataFrame(registrations_data)
+            
+            # Filtrer les inscriptions associées à un événement valide
+            df_regs_valid = df_regs[df_regs["event_id"].notna()]
+            
+            if not df_events.empty and not df_regs_valid.empty:
+                # Jointure pour obtenir le nom de l'événement associé à l'inscription
+                df_merged = pd.merge(df_regs_valid, df_events, left_on="event_id", right_on="id", suffixes=('_reg', '_event'))
+                
+                # Tableau récapitulatif : inscrits et repas par événement (les colonnes réelles de events sont 'title' et 'start_date')
+                if "title_event" in df_merged.columns or "title" in df_merged.columns:
+                    title_col = "title_event" if "title_event" in df_merged.columns else "title"
+                    summary = df_merged.groupby(title_col).agg(
+                        Inscrits=('volunteer_name', 'count'),
+                        Repas_Prévus=('needs_meal', lambda x: int(x.fillna(False).sum()))
+                    ).reset_index().rename(columns={
+                        title_col: "Chantier",
+                        "Inscrits": "Nombre d'inscrits",
+                        "Repas_Prévus": "Repas requis"
+                    })
+                    
+                    st.dataframe(summary, use_container_width=True, hide_index=True)
+            else:
+                st.info("Aucune inscription associée à un chantier pour le moment.")
+        else:
+            st.info("Aucune inscription enregistrée dans la base de données.")
+    else:
+        st.warning("Aucun chantier configuré dans la table events. Créez des chantiers dans votre base Supabase (avec title, start_date et type).")
