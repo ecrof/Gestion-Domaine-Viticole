@@ -241,25 +241,77 @@ elif st.session_state["active_tab"] == "Tâches":
     else:
         st.info("Aucune tâche disponible.")
 
-# ONGLET 3 : RESSOURCES
+# ONGLET 3 : RESSOURCES ET CALENDRIER
 elif st.session_state["active_tab"] == "Ressources":
-    st.header("Ressources et Matériel")
+    st.header("Ressources et Calendrier Viticole (Belgique)")
     
-    st.markdown("""
-    ### ✂️ Taille
-    - Sécateur manuel ou électrique (batteries chargées)
-    - Scie passe-partout
-    - Gants de protection anti-coupure
-    - Vêtements chauds et adaptés aux intempéries
+    # L'import de datetime doit idéalement être placé en haut du fichier avec les autres imports
+    import datetime 
+    
+    # Récupération du mois en cours
+    current_month = datetime.date.today().month
+    
+    MONTHS_FR = {
+        1: "Janvier", 2: "Février", 3: "Mars", 4: "Avril", 
+        5: "Mai", 6: "Juin", 7: "Juillet", 8: "Août", 
+        9: "Septembre", 10: "Octobre", 11: "Novembre", 12: "Décembre"
+    }
 
-    ### 🌱 Ébourgeonnage
-    - Gants légers de protection
-    - Ceinture de maintien lombaire (recommandé)
-    - Lunettes de protection contre les sarments
-
-    ### 🍇 Vendanges
-    - Sécateur de vendange (épinette)
-    - Seau / Panier de récolte
-    - Bottes ou chaussures de sécurité étanches
-    - Casquette ou chapeau, crème solaire
-    """)
+    # Structure de données factuelle du cycle viticole belge
+    calendar = [
+        {
+            "activity": "Taille", 
+            "months": [1, 2, 3], 
+            "tools": "Sécateur manuel/électrique (batteries chargées), scie passe-partout, gants anti-coupure."
+        },
+        {
+            "activity": "Ébourgeonnage & Palissage", 
+            "months": [4, 5], 
+            "tools": "Gants légers, matériel d'attache, ceinture de maintien lombaire."
+        },
+        {
+            "activity": "Écimage, Rognage & Débroussaillage", 
+            "months": [6, 7], 
+            "tools": "Cisaille, rogneuse, débroussailleuse, EPI complet (visière, casque anti-bruit)."
+        },
+        {
+            "activity": "Effeuillage", 
+            "months": [7, 8], 
+            "tools": "Gants, lunettes de protection contre les sarments."
+        },
+        {
+            "activity": "Vendanges", 
+            "months": [9, 10], 
+            "tools": "Sécateur de vendange (épinette), seaux/paniers, bottes étanches, vêtements de pluie."
+        },
+        {
+            "activity": "Repos hivernal & Entretien du matériel", 
+            "months": [11, 12], 
+            "tools": "Graisse, affûteuse, outils de maintenance mécanique."
+        }
+    ]
+    
+    # Séparation algorithmique selon le mois en cours
+    current_activities = [item for item in calendar if current_month in item["months"]]
+    other_activities = [item for item in calendar if current_month not in item["months"]]
+    
+    # Affichage dynamique conditionnel
+    st.subheader("Action(s) critique(s) ce mois-ci")
+    
+    if current_activities:
+        for item in current_activities:
+            st.error(f"⚠️ Période en cours : {item['activity']}")
+            st.write(f"**Matériel requis :** {item['tools']}")
+    else:
+        st.info("Aucune activité viticole majeure répertoriée pour ce mois.")
+        
+    st.markdown("---")
+    
+    # Affichage statique du reste de l'année
+    st.subheader("Planification annuelle")
+    
+    for item in other_activities:
+        months_str = " - ".join([MONTHS_FR[m] for m in item["months"]])
+        with st.expander(f"{item['activity']} ({months_str})"):
+            st.write(f"**Période :** {months_str}")
+            st.write(f"**Matériel :** {item['tools']}")
