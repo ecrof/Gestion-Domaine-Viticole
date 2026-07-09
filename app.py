@@ -19,8 +19,12 @@ if "active_tab" not in st.session_state:
     st.session_state["active_tab"] = "Tâches"
 if "reg_volunteer_name" not in st.session_state:
     st.session_state["reg_volunteer_name"] = ""
-if "reg_needs_meal" not in st.session_state:
-    st.session_state["reg_needs_meal"] = False
+if "reg_meal_lunch" not in st.session_state:
+    st.session_state["reg_meal_lunch"] = False
+if "reg_meal_dinner" not in st.session_state:
+    st.session_state["reg_meal_dinner"] = False
+if "reg_comment" not in st.session_state:
+    st.session_state["reg_comment"] = ""
 if "task_title" not in st.session_state:
     st.session_state["task_title"] = ""
 if "task_row_range" not in st.session_state:
@@ -64,7 +68,9 @@ def parse_ranges(range_str: str):
 def add_registration_callback():
     event_id = st.session_state.get("reg_event")
     name = st.session_state.get("reg_volunteer_name", "").strip()
-    meal = st.session_state.get("reg_needs_meal", False)
+    meal_lunch = st.session_state.get("reg_meal_lunch", False)
+    meal_dinner = st.session_state.get("reg_meal_dinner", False)
+    comment = st.session_state.get("reg_comment", "").strip()
     
     if not name:
         st.error("Veuillez saisir le nom de l'intervenant.")
@@ -75,13 +81,18 @@ def add_registration_callback():
             supabase.table("registrations").insert({
                 "event_id": event_id,
                 "volunteer_name": name,
-                "needs_meal": meal
+                "meal_lunch": meal_lunch,
+                "meal_dinner": meal_dinner,
+                "comment": comment if comment else None
             }).execute()
             st.success("Inscription réussie !")
             # Réinitialisation des champs du formulaire
             st.session_state.reg_volunteer_name = ""
-            st.session_state.reg_needs_meal = False
+            st.session_state.reg_meal_lunch = False
+            st.session_state.reg_meal_dinner = False
+            st.session_state.reg_comment = ""
         except Exception as e:
+            st.error(f"Erreur lors de l'inscription : {e}")
             st.error(f"Erreur lors de l'inscription : {e}")
 
 
@@ -256,7 +267,7 @@ if st.session_state["active_tab"] == "Tâches":
         st.info("Aucune tâche répertoriée.")
 
     st.markdown("---")
-    st.subheader("🏆 Classement d'activité du vignoble")
+    st.subheader("🏆 Activité du vignoble")
     if tasks_data:
         completed_tasks = [t for t in tasks_data if t.get("status") == "Fait" and t.get("completed_by")]
         if completed_tasks:
@@ -368,9 +379,16 @@ elif st.session_state["active_tab"] == "Chantiers":
                          format_func=lambda x: event_options[x], 
                          key="reg_event")
             st.text_input("Nom de l'intervenant", key="reg_volunteer_name")
-            st.checkbox("Repas requis (cocher si oui)", key="reg_needs_meal")
             
-            # Utilisation du callback pour l'insertion
+            # Deux checkboxes distinctes pour les repas du midi et du soir
+            col_midi, col_soir = st.columns(2)
+            col_midi.checkbox("Repas du MIDI requis", key="reg_meal_lunch")
+            col_soir.checkbox("Repas du SOIR requis", key="reg_meal_dinner")
+            
+            # Saisie de commentaire libre (allergies, matériel...)
+            st.text_input("Commentaire libre (ex: allergies, nourriture et matériel apporté, voiture dispo et trajets effectués...)", key="reg_comment")
+            
+            # Utilisation du callback pour l'inscription
             st.form_submit_button("S'inscrire", on_click=add_registration_callback)
             
         st.subheader("Récapitulatif des inscriptions")
@@ -378,6 +396,14 @@ elif st.session_state["active_tab"] == "Chantiers":
             df_events = pd.DataFrame(events_data)
             df_regs = pd.DataFrame(registrations_data)
             
+            # Tolérance aux colonnes si le SQL de migration n'a pas encore été lancé
+            if "meal_lunch" not in df_regs.columns:
+                df_regs["meal_lunch"] = df_regs["needs_meal"] if "needs_meal" in df_regs.columns else False
+            if "meal_dinner" not in df_regs.columns:
+                df_regs["meal_dinner"] = False
+            if "comment" not in df_regs.columns:
+                df_regs["comment"] = ""
+                
             # Filtrer les inscriptions associées à un événement valide
             df_regs_valid = df_regs[df_regs["event_id"].notna()]
             
@@ -385,19 +411,59 @@ elif st.session_state["active_tab"] == "Chantiers":
                 # Jointure pour obtenir le nom de l'événement associé à l'inscription
                 df_merged = pd.merge(df_regs_valid, df_events, left_on="event_id", right_on="id", suffixes=('_reg', '_event'))
                 
-                # Tableau récapitulatif : inscrits et repas par événement (les colonnes réelles de events sont 'title' et 'start_date')
-                if "title_event" in df_merged.columns or "title" in df_merged.columns:
-                    title_col = "title_event" if "title_event" in df_merged.columns else "title"
-                    summary = df_merged.groupby(title_col).agg(
-                        Inscrits=('volunteer_name', 'count'),
-                        Repas_Prévus=('needs_meal', lambda x: int(x.fillna(False).sum()))
-                    ).reset_index().rename(columns={
-                        title_col: "Chantier",
-                        "Inscrits": "Nombre d'inscrits",
-                        "Repas_Prévus": "Repas requis"
-                    })
+                # S'assurer de la présence des colonnes dans le merge
+                if "meal_lunch" not in df_merged.columns:
+                    df_merged["meal_lunch"] = False
+                if "meal_dinner" not in df_merged.columns:
+                    df_merged["meal_dinner"] = False
+                if "comment" not in df_merged.columns:
+                    df_merged["comment"] = ""
+                
+                # --- AFFICHAGE DES GRANDS TOTALS GENERAUX ---
+                total_lunch = int(df_merged["meal_lunch"].fillna(False).sum())
+                total_dinner = int(df_merged["meal_dinner"].fillna(False).sum())
+                total_people = int(df_merged["volunteer_name"].nunique())
+                
+                st.markdown("#### 📊 Cumul général des besoins")
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("👥 Intervenants uniques", total_people)
+                col_m2.metric("🍽️ Repas MIDI totaux", total_lunch)
+                col_m3.metric("🌙 Repas SOIR totaux", total_dinner)
+                st.markdown("---")
+                
+                # --- AFFICHAGE DETAILE PAR EVENEMENT ---
+                st.markdown("### 📅 Qui vient ? Suivi détaillé par Chantier")
+                for _, event in df_events.iterrows():
+                    event_id = event["id"]
+                    event_title = event["title"]
+                    event_date = event["start_date"]
                     
-                    st.dataframe(summary, use_container_width=True, hide_index=True)
+                    # Récupérer les inscriptions pour cet événement précis
+                    event_regs = df_regs_valid[df_regs_valid["event_id"] == event_id]
+                    
+                    with st.expander(f"🛠️ {event_date} — {event_title} ({len(event_regs)} inscrit(s))", expanded=True):
+                        if not event_regs.empty:
+                            # Calcul des repas requis sur cet événement
+                            evt_lunch = int(event_regs["meal_lunch"].fillna(False).sum())
+                            evt_dinner = int(event_regs["meal_dinner"].fillna(False).sum())
+                            
+                            col_e1, col_e2 = st.columns(2)
+                            col_e1.markdown(f"☀️ **Repas MIDI requis :** `{evt_lunch}`")
+                            col_e2.markdown(f"🌙 **Repas SOIR requis :** `{evt_dinner}`")
+                            
+                            # Tableau de détail des inscrits de cet événement
+                            df_evt_display = event_regs[["volunteer_name", "meal_lunch", "meal_dinner", "comment"]].copy()
+                            df_evt_display["Repas Midi"] = df_evt_display["meal_lunch"].apply(lambda x: "Oui" if x else "Non")
+                            df_evt_display["Repas Soir"] = df_evt_display["meal_dinner"].apply(lambda x: "Oui" if x else "Non")
+                            df_evt_display["Commentaire"] = df_evt_display["comment"].fillna("")
+                            
+                            df_evt_display_clean = df_evt_display.rename(columns={
+                                "volunteer_name": "Intervenant"
+                            })[["Intervenant", "Repas Midi", "Repas Soir", "Commentaire"]]
+                            
+                            st.dataframe(df_evt_display_clean, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Aucun bénévole n'est inscrit sur ce chantier pour l'instant.")
             else:
                 st.info("Aucune inscription associée à un chantier pour le moment.")
         else:
