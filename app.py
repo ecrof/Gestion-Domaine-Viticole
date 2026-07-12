@@ -297,98 +297,153 @@ if st.session_state["active_tab"] == "Tâches":
         else:
             st.info("Toutes les tâches ont été réalisées ! 🎉")
             
-        # 2. Affichage des tâches "Faites" triées par date, 10 dernières uniquement
-        st.markdown("### ✅ Tâches terminées (10 dernières)")
+        # 2. Affichage des tâches "Faites" triées par date, groupées de manière compacte
+        st.markdown("### ✅ Tâches terminées récentes")
         if not df_done.empty:
             if "created_at" in df_done.columns:
-                df_done = df_done.sort_values(by="created_at", ascending=False)
-            df_done_limited = df_done.head(10)
+                df_done["sort_key"] = df_done["row_number"].apply(lambda r: 2 * r - 1 if r > 0 else 2 * abs(r))
+                # On trie d'abord par date de complétion décroissante, puis par emplacement physique
+                df_done = df_done.sort_values(by=["created_at", "sort_key"], ascending=[False, True])
             
-            for index, row in df_done_limited.iterrows():
-                col_rang_val, col_desc, col_status, col_who = st.columns([2.0, 2.5, 1.0, 1.8])
+            # Prendre les 20 dernières tâches faites pour ne pas surcharger, puis grouper
+            df_done_limited = df_done.head(20)
+            
+            # Groupement par description de tâche (title)
+            grouped_done = df_done_limited.groupby("title")
+            
+            for title, group in grouped_done:
+                st.markdown(f"**🍇 {title}**")
                 
-                raw_row_num = row.get('row_number')
-                old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
+                # Sous-groupement par intervenant
+                worker_groups = group.groupby("completed_by")
                 
-                try:
-                    default_idx = option_keys.index(old_row_num)
-                except ValueError:
-                    default_idx = 0
-                
-                new_row_num = col_rang_val.selectbox(
-                    "Emplacement",
-                    options=location_options,
-                    index=default_idx,
-                    format_func=lambda x: x[1],
-                    key=f"row_num_done_{row.get('id')}",
-                    label_visibility="collapsed"
-                )[0]
-                
-                if new_row_num != old_row_num:
-                    try:
-                        supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
-                        st.success("Emplacement mis à jour !")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur de modification de l'emplacement : {e}")
-                
-                col_desc.write(row.get('title', ''))
-                col_status.markdown("<div style='padding-top: 5px; color: #2e7d32; font-weight: bold;'>🟢 Fait</div>", unsafe_allow_html=True)
-                # Permet de modifier le nom en direct s'il y a eu une erreur de saisie
-                old_name = row.get('completed_by') or 'Anonyme'
-                new_name = col_who.text_input("Réalisé par", value=old_name, key=f"edit_{row.get('id')}", label_visibility="collapsed")
-                if new_name != old_name:
-                    try:
-                        supabase.table("tasks").update({"completed_by": new_name.strip()}).eq("id", row.get('id')).execute()
-                        st.success("Nom mis à jour !")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur de mise à jour : {e}")
+                for worker, w_group in worker_groups:
+                    locations = []
+                    for _, row in w_group.iterrows():
+                        r_num = row["row_number"]
+                        label = f"Rang {r_num}" if r_num > 0 else f"Interligne {abs(r_num)}-{abs(r_num)+1}"
+                        locations.append(label)
+                    
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;👤 **{worker}** : {', '.join(locations)}")
+                st.markdown("<hr style='margin: 8px 0; border: none; border-top: 1px dotted #eee;'>", unsafe_allow_html=True)
+        else:
+            st.info("Aucune tâche terminée pour le moment.")
 
         # 3. Section Gestion Avancée
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("🛠️ Gestion avancée et modifications individuelles"):
-            st.markdown("##### Modifier l'emplacement ou supprimer des tâches en cours")
-            if not df_todo.empty:
-                for index, row in df_todo.iterrows():
-                    col_edit_desc, col_edit_loc, col_edit_del = st.columns([3.0, 2.0, 1.0])
-                    
-                    col_edit_desc.write(f"**{row.get('title', '')}**")
-                    
-                    raw_row_num = row.get('row_number')
-                    old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
-                    
-                    try:
-                        default_idx = option_keys.index(old_row_num)
-                    except ValueError:
-                        default_idx = 0
+            tab_edit_todo, tab_edit_done = st.tabs(["📋 Tâches en cours", "✅ Tâches terminées"])
+            
+            with tab_edit_todo:
+                st.markdown("##### Modifier l'emplacement ou supprimer des tâches en cours")
+                if not df_todo.empty:
+                    for index, row in df_todo.iterrows():
+                        col_edit_desc, col_edit_loc, col_edit_del = st.columns([3.0, 2.0, 1.0])
                         
-                    new_row_num = col_edit_loc.selectbox(
-                        "Emplacement",
-                        options=location_options,
-                        index=default_idx,
-                        format_func=lambda x: x[1],
-                        key=f"edit_loc_todo_{row.get('id')}",
-                        label_visibility="collapsed"
-                    )[0]
-                    
-                    if new_row_num != old_row_num:
+                        col_edit_desc.write(f"**{row.get('title', '')}**")
+                        
+                        raw_row_num = row.get('row_number')
+                        old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
+                        
                         try:
-                            supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
-                            st.success("Emplacement mis à jour !")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erreur de modification de l'emplacement : {e}")
+                            default_idx = option_keys.index(old_row_num)
+                        except ValueError:
+                            default_idx = 0
                             
-                    if col_edit_del.button("🗑️ Supprimer", key=f"del_todo_{row.get('id')}", use_container_width=True):
+                        new_row_num = col_edit_loc.selectbox(
+                            "Emplacement",
+                            options=location_options,
+                            index=default_idx,
+                            format_func=lambda x: x[1],
+                            key=f"edit_loc_todo_{row.get('id')}",
+                            label_visibility="collapsed"
+                        )[0]
+                        
+                        if new_row_num != old_row_num:
+                            try:
+                                supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
+                                st.success("Emplacement mis à jour !")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur de modification de l'emplacement : {e}")
+                                
+                        if col_edit_del.button("🗑️ Supprimer", key=f"del_todo_{row.get('id')}", use_container_width=True):
+                            try:
+                                supabase.table("tasks").delete().eq("id", row.get('id')).execute()
+                                st.success("Tâche supprimée !")
+                                st.rerun()
+                            except Exception as e:
+                                r_err = f"Erreur lors de la suppression : {e}"
+                                st.error(r_err)
+                else:
+                    st.info("Aucune tâche en cours à modifier ou supprimer.")
+                    
+            with tab_edit_done:
+                st.markdown("##### Modifier ou réinitialiser des tâches terminées (20 dernières)")
+                if not df_done.empty:
+                    df_done_edit_list = df_done.head(20)
+                    for index, row in df_done_edit_list.iterrows():
+                        col_ed_desc, col_ed_loc, col_ed_who, col_ed_revert, col_ed_del = st.columns([2.0, 1.8, 1.8, 1.2, 1.0])
+                        
+                        col_ed_desc.write(f"**{row.get('title', '')}**")
+                        
+                        raw_row_num = row.get('row_number')
+                        old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
+                        
                         try:
-                            supabase.table("tasks").delete().eq("id", row.get('id')).execute()
-                            st.success("Tâche supprimée !")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erreur lors de la suppression : {e}")
-            else:
-                st.info("Aucune tâche en cours à modifier ou supprimer.")
+                            default_idx = option_keys.index(old_row_num)
+                        except ValueError:
+                            default_idx = 0
+                            
+                        new_row_num = col_ed_loc.selectbox(
+                            "Emplacement",
+                            options=location_options,
+                            index=default_idx,
+                            format_func=lambda x: x[1],
+                            key=f"edit_loc_done_{row.get('id')}",
+                            label_visibility="collapsed"
+                        )[0]
+                        
+                        if new_row_num != old_row_num:
+                            try:
+                                supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
+                                st.success("Emplacement mis à jour !")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur de modification de l'emplacement : {e}")
+                                
+                        old_name = row.get('completed_by') or 'Anonyme'
+                        new_name = col_ed_who.text_input(
+                            "Réalisé par", 
+                            value=old_name, 
+                            key=f"edit_who_done_{row.get('id')}", 
+                            label_visibility="collapsed"
+                        )
+                        if new_name != old_name:
+                            try:
+                                supabase.table("tasks").update({"completed_by": new_name.strip()}).eq("id", row.get('id')).execute()
+                                st.success("Nom mis à jour !")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur de mise à jour : {e}")
+                                
+                        if col_ed_revert.button("↩️ À faire", key=f"revert_done_{row.get('id')}", use_container_width=True, help="Remettre cette tâche au statut 'À faire'"):
+                            try:
+                                supabase.table("tasks").update({"status": "À faire", "completed_by": None}).eq("id", row.get('id')).execute()
+                                st.success("Tâche remise à faire !")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur lors du retour en arrière : {e}")
+                                
+                        if col_ed_del.button("🗑️ Supprimer", key=f"del_done_{row.get('id')}", use_container_width=True):
+                            try:
+                                supabase.table("tasks").delete().eq("id", row.get('id')).execute()
+                                st.success("Tâche supprimée !")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur lors de la suppression : {e}")
+                else:
+                    st.info("Aucune tâche terminée à modifier.")
 
     else:
         st.info("Aucune tâche répertoriée.")
