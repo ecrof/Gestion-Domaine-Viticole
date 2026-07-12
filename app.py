@@ -784,42 +784,67 @@ CREATE POLICY "Allow public delete on presences" ON public.vignoble_presences FO
         9: "Septembre", 10: "Octobre", 11: "Novembre", 12: "Décembre"
     }
 
-    # Structure de données factuelle du cycle viticole belge
+    # Structure de données factuelle du cycle viticole belge ordonnée chronologiquement de Janvier à Décembre
     calendar = [
         {
             "activity": "Taille", 
             "months": [1, 2, 3], 
-            "tools": "Sécateur manuel/électrique (batteries chargées), scie passe-partout, gants anti-coupure."
+            "tools": "Sécateur manuel/électrique (batteries chargées), scie passe-partout, gants anti-coupure.",
+            "details": "Taille des sarments durant le repos hivernal pour réguler la production de l'année à venir."
         },
         {
             "activity": "Ébourgeonnage & Palissage", 
             "months": [4, 5], 
-            "tools": "Gants légers, matériel d'attache, ceinture de maintien lombaire."
+            "tools": "Gants légers, matériel d'attache, ceinture de maintien lombaire.",
+            "details": "Sélection des meilleurs bourgeons et guidage des jeunes rameaux vers le haut."
         },
         {
-            "activity": "Écimage, Rognage & Débroussaillage", 
-            "months": [6, 7], 
-            "tools": "Cisaille, rogneuse, débroussailleuse, EPI complet (visière, casque anti-bruit)."
+            "activity": "Épamprage", 
+            "months": [7], 
+            "tools": "Gants anti-coupure, brosse dure si nécessaire.",
+            "details": "Élimination stricte des pampres (repousses non fructifères) sur le tronc et à la base du cep pour empêcher le détournement de la sève."
         },
         {
-            "activity": "Effeuillage", 
-            "months": [7, 8], 
-            "tools": "Gants, lunettes de protection contre les sarments."
+            "activity": "Gestion de l'enherbement et désherbage", 
+            "months": [7], 
+            "tools": "Débroussailleuse, faux, EPI complet (visière, protège-tibias, casque anti-bruit).",
+            "details": "Fauchage ou arrachage des herbes hautes sous le rang. Cette action supprime la concurrence hydrique et limite l'humidité stagnante, un vecteur de maladies cryptogamiques."
+        },
+        {
+            "activity": "Relevage et palissage", 
+            "months": [7], 
+            "tools": "Agrafes de palissage, matériel d'attache, ficelles.",
+            "details": "Maintien de la végétation dans le plan de palissage. Les rameaux porteurs de grappes qui s'affaissent vers le sol doivent impérativement être relevés pour éviter la pourriture et le contact avec les pathogènes du sol."
+        },
+        {
+            "activity": "Rognage / Écimage", 
+            "months": [7], 
+            "tools": "Cisailles, rogneuse manuelle ou mécanique.",
+            "details": "Coupe des rameaux excédentaires, stériles ou retombants. Cela stoppe la croissance végétative inutile et garantit l'accessibilité au rang."
+        },
+        {
+            "activity": "Effeuillage (zone des grappes)", 
+            "months": [7], 
+            "tools": "Gants fins, bacs d'élimination des feuilles.",
+            "details": "Retrait des feuilles situées à la base des rameaux pour exposer les grappes. Cela améliore l'aération, réduit les risques de botrytis et optimise l'efficacité des traitements sanitaires."
         },
         {
             "activity": "Vendanges", 
             "months": [8, 9, 10], 
-            "tools": "Sécateur de vendange (épinette), seaux/paniers, bottes étanches, vêtements de pluie."
+            "tools": "Sécateur de vendange (épinette), seaux/paniers, bottes étanches, vêtements de pluie.",
+            "details": "Récolte manuelle des raisins arrivés à maturité optimale."
         },
         {
             "activity": "Vinification & Soutirage", 
             "months": [10, 11, 12], 
-            "tools": "Matériel de vinification."
+            "tools": "Matériel de vinification.",
+            "details": "Pressurage, fermentation et transfert du vin pour éliminer les lies."
         },
         {
             "activity": "Repos hivernal & Entretien du matériel", 
             "months": [11, 12], 
-            "tools": "Graisse, affûteuse, outils de maintenance mécanique."
+            "tools": "Graisse, affûteuse, outils de maintenance mécanique.",
+            "details": "Nettoyage, désinfection et affûtage des outils avant la reprise."
         }
     ]
     
@@ -834,6 +859,9 @@ CREATE POLICY "Allow public delete on presences" ON public.vignoble_presences FO
         for item in current_activities:
             st.error(f"⚠️ Période en cours : {item['activity']}")
             st.write(f"**Matériel requis :** {item['tools']}")
+            if item.get("details"):
+                st.markdown(f"**Description :** {item['details']}")
+            st.markdown("<hr style='margin: 15px 0; border: none; border-top: 1px dashed #ddd;'>", unsafe_allow_html=True)
     else:
         st.info("Aucune activité viticole majeure répertoriée pour ce mois.")
         
@@ -847,6 +875,21 @@ CREATE POLICY "Allow public delete on presences" ON public.vignoble_presences FO
         with st.expander(f"{item['activity']} ({months_str})"):
             st.write(f"**Période :** {months_str}")
             st.write(f"**Matériel :** {item['tools']}")
+            if item.get("details"):
+                st.markdown(f"**Description :** {item['details']}")
+
+    # Image personnalisable locale ou distante tout à la fin de la page du calendrier
+    st.markdown("---")
+    st.subheader("📸 Le Vignoble idéal !")
+    
+    # Vous pouvez remplacer 'vignoble.jpg' par le chemin exact ou l'image de votre choix dans votre dossier de projet
+    image_path = "vignoble.png"
+    try:
+        st.image(image_path, use_container_width=True, caption="Notre magnifique domaine viticole")
+    except Exception:
+        # Fallback élégant avec un placeholder descriptif si l'image n'est pas encore présente dans le dossier local
+        st.info("💡 Ajoutez une image nommée `vignoble.png` dans le dossier de votre application pour l'afficher ici à la place de cette illustration.")
+        st.image("https://images.unsplash.com/photo-1504198458649-012802d26314?auto=format&fit=crop&w=1200&q=80", use_container_width=True, caption="Illustration — Le travail de la vigne")
 
 # ONGLET 3 : CHANTIERS
 elif st.session_state["active_tab"] == "Chantiers":
