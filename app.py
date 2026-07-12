@@ -271,19 +271,23 @@ if st.session_state["active_tab"] == "Tâches":
     if tasks_data:
         completed_tasks = [t for t in tasks_data if t.get("status") == "Fait" and t.get("completed_by")]
         if completed_tasks:
-            leaderboard = {}
+            worker_tasks = {}
             for t in completed_tasks:
                 worker = t.get("completed_by").strip()
-                leaderboard[worker] = leaderboard.get(worker, 0) + 1
+                title = t.get("title", "").strip()
+                if worker not in worker_tasks:
+                    worker_tasks[worker] = []
+                if title and title not in worker_tasks[worker]:
+                    worker_tasks[worker].append(title)
             
-            df_leaderboard = pd.DataFrame([
-                {"Contributeur": worker, "Tâches réalisées": count}
-                for worker, count in leaderboard.items()
-            ]).sort_values(by="Tâches réalisées", ascending=False)
-            
-            st.dataframe(df_leaderboard, use_container_width=True, hide_index=True)
+            recognition_data = [
+                {"Intervenant": worker, "Tâches accomplies": ", ".join(tasks)}
+                for worker, tasks in worker_tasks.items()
+            ]
+            df_recognition = pd.DataFrame(recognition_data)
+            st.dataframe(df_recognition, use_container_width=True, hide_index=True)
         else:
-            st.info("Aucune tâche n'a encore été réalisée pour alimenter le classement.")
+            st.info("Aucune tâche n'a encore été réalisée pour figurer dans l'activité.")
     else:
         st.info("Aucune tâche disponible.")
 
