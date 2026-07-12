@@ -29,6 +29,8 @@ if "task_title" not in st.session_state:
     st.session_state["task_title"] = ""
 if "task_row_range" not in st.session_state:
     st.session_state["task_row_range"] = "1"
+if "task_location_type" not in st.session_state:
+    st.session_state["task_location_type"] = "Rangée(s)"
 
 
 def parse_ranges(range_str: str):
@@ -99,6 +101,7 @@ def add_registration_callback():
 def add_task_callback():
     title = st.session_state.get("task_title", "").strip()
     range_str = st.session_state.get("task_row_range", "1").strip()
+    location_type = st.session_state.get("task_location_type", "Rangée(s)")
     
     if not title:
         st.error("Veuillez saisir la description de la tâche.")
@@ -106,8 +109,15 @@ def add_task_callback():
     
     row_numbers = parse_ranges(range_str)
     if not row_numbers:
-        st.error("Aucun numéro de rang valide n'a été détecté (ex: 1, 3-5, 7).")
+        st.error("Aucun numéro valide n'a été détecté (ex: 1, 3-5, 7).")
         return
+    
+    if location_type == "Interligne(s)":
+        # Les interlignes sont stockés sous forme de nombres négatifs. L'interligne max est entre 39 et 40 (valeur -39).
+        row_numbers = [-r for r in row_numbers if r < 40]
+        if not row_numbers:
+            st.error("Aucun numéro d'interligne valide n'a été détecté (doit être entre 1 et 39).")
+            return
     
     try:
         payloads = [
@@ -119,10 +129,16 @@ def add_task_callback():
             for row_num in row_numbers
         ]
         supabase.table("tasks").insert(payloads).execute()
-        st.success(f"{len(row_numbers)} tâche(s) ajoutée(s) avec succès pour les rangs {row_numbers} !")
+        
+        if location_type == "Interligne(s)":
+            labels = [f"{abs(r)}-{abs(r)+1}" for r in row_numbers]
+            st.success(f"{len(row_numbers)} tâche(s) ajoutée(s) avec succès pour les interlignes {', '.join(labels)} !")
+        else:
+            st.success(f"{len(row_numbers)} tâche(s) ajoutée(s) avec succès pour les rangs {row_numbers} !")
         # Réinitialisation des champs du formulaire
         st.session_state.task_title = ""
         st.session_state.task_row_range = "1"
+        st.session_state.task_location_type = "Rangée(s)"
     except Exception as e:
         st.error(f"Erreur lors de l'ajout des tâches : {e}")
 
@@ -180,8 +196,20 @@ if st.session_state["active_tab"] == "Tâches":
     
     st.subheader("Ajouter une tâche")
     with st.form("task_form"):
-        st.text_input("Description de la tâche", key="task_title")
-        st.text_input("Numéro(s) de rang (ex: 1, 3-5, 7-9, 13)", key="task_row_range", help="Saisissez des numéros uniques séparés par des virgules ou des plages de numéros avec des tirets.")
+        st.text_input("Description de la tâche", key="task_title", placeholder="Ex: Épamprement, Taille, Palissage...")
+        
+        col_type, col_range = st.columns([1, 2])
+        with col_type:
+            st.radio("Type d'emplacement", options=["Rangée(s)", "Interligne(s)"], key="task_location_type", help="Sélectionnez si la tâche concerne directement des rangs de vigne ou l'espace entre deux rangs (interligne).")
+        with col_range:
+            st.text_input(
+                "Numéro(s) (ex: 1, 3-5, 7, 9)", 
+                key="task_row_range", 
+                help="Saisissez des numéros uniques séparés par des virgules ou des plages avec un tiret.\n\n"
+                     "- En mode **Rangée(s)** : '1, 3-5' créera des tâches pour les Rangs 1, 3, 4 et 5.\n"
+                     "- En mode **Interligne(s)** : '1, 3-5' créera des tâches pour les interlignes entre 1 et 2, 3 et 4, 4 et 5, 5 et 6."
+            )
+            
         st.form_submit_button("Ajouter", on_click=add_task_callback)
         
     st.subheader("Liste des tâches")
@@ -192,37 +220,80 @@ if st.session_state["active_tab"] == "Tâches":
         df_todo = df_tasks[df_tasks["status"] != "Fait"] if "status" in df_tasks.columns else pd.DataFrame()
         df_done = df_tasks[df_tasks["status"] == "Fait"] if "status" in df_tasks.columns else pd.DataFrame()
         
-        # 1. Affichage des tâches "À faire" triées par numéro de rang
+        # Options de localisation physique pour les listes de sélection
+        location_options = []
+        for r in range(1, 41):
+            location_options.append((r, f"Rang {r}"))
+            if r < 40:
+                location_options.append((-r, f"Interligne {r}-{r+1}"))
+        option_keys = [opt[0] for opt in location_options]
+
+        # 1. Affichage des tâches "À faire" triées et groupées pour validation rapide
         st.markdown("### 📋 Tâches à faire")
         if not df_todo.empty:
             if "row_number" in df_todo.columns:
-                df_todo = df_todo.sort_values(by="row_number")
+                # Tri physique : rang 1, puis interligne 1-2, puis rang 2, puis interligne 2-3, etc.
+                df_todo["sort_key"] = df_todo["row_number"].apply(lambda r: 2 * r - 1 if r > 0 else 2 * abs(r))
+                df_todo = df_todo.sort_values(by="sort_key")
             
-            for index, row in df_todo.iterrows():
-                col_rang_lbl, col_rang_val, col_desc, col_status, col_who, col_btn = st.columns([0.6, 1.0, 2.5, 1, 1.5, 1])
+            # On groupe les tâches à faire par leur titre (description)
+            grouped_todo = df_todo.groupby("title")
+            
+            for title, group in grouped_todo:
+                st.markdown(f"#### 🍇 {title}")
                 
-                col_rang_lbl.markdown("<div style='padding-top: 5px; font-weight: bold;'>Rang</div>", unsafe_allow_html=True)
-                # Saisie modifiable du numéro de rang
-                raw_row_num = row.get('row_number')
-                old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
-                new_row_num = col_rang_val.number_input("Rang", min_value=1, max_value=40, value=old_row_num, key=f"row_num_todo_{row.get('id')}", label_visibility="collapsed")
-                if new_row_num != old_row_num:
-                    try:
-                        supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
-                        st.success("Rang mis à jour !")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur de modification du rang : {e}")
+                # Construire la liste des options (task_id, label) pour ce groupe
+                options = []
+                for _, row in group.iterrows():
+                    r_num = row["row_number"]
+                    label = f"Rang {r_num}" if r_num > 0 else f"Interligne {abs(r_num)}-{abs(r_num)+1}"
+                    options.append((row["id"], label))
                 
-                col_desc.write(row.get('title', ''))
-                col_status.warning("À faire")
-                # Champ de saisie pour l'intervenant réalisateur de la tâche
-                who = col_who.text_input("Fait par", key=f"who_{row.get('id')}", placeholder="Prénom Nom", label_visibility="collapsed")
-                # Bouton de validation pour changer le statut utilisant un callback
-                col_btn.button("✓ Fait", 
-                            key=f"btn_done_{row.get('id')}", 
-                            on_click=complete_task_callback, 
-                            args=(row.get("id"), who))
+                option_labels = [opt[1] for opt in options]
+                option_map = {opt[1]: opt[0] for opt in options}
+                
+                # Formulaire de validation groupée compact en 3 colonnes
+                col_sel, col_who, col_btn = st.columns([3.0, 1.8, 1.0])
+                
+                selected_labels = col_sel.multiselect(
+                    f"Sélectionner les emplacements réalisés pour {title}",
+                    options=option_labels,
+                    default=[],
+                    key=f"sel_{title}",
+                    label_visibility="collapsed",
+                    placeholder="Sélectionner les emplacements faits..."
+                )
+                
+                who = col_who.text_input(
+                    "Fait par", 
+                    key=f"who_group_{title}", 
+                    placeholder="Votre Prénom Nom", 
+                    label_visibility="collapsed"
+                )
+                
+                if col_btn.button("✓ Fait", key=f"btn_group_{title}", use_container_width=True):
+                    if not who.strip():
+                        st.error("Veuillez saisir le nom de l'intervenant pour valider.")
+                    elif not selected_labels:
+                        st.error("Veuillez sélectionner au moins un emplacement.")
+                    else:
+                        try:
+                            # Récupérer les ids des tâches correspondantes
+                            selected_ids = [option_map[lbl] for lbl in selected_labels]
+                            for t_id in selected_ids:
+                                supabase.table("tasks").update({
+                                    "status": "Fait", 
+                                    "completed_by": who.strip()
+                                }).eq("id", t_id).execute()
+                            st.success(f"{len(selected_ids)} tâche(s) validée(s) par {who} !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur lors de la validation : {e}")
+                
+                # Affichage de la liste de tous les emplacements restants en dessous
+                remaining_text = ", ".join(option_labels)
+                st.markdown(f"<div style='font-size: 0.85rem; color: #666; margin-top: -10px; margin-bottom: 15px;'>📍 <b>Emplacements restants :</b> {remaining_text}</div>", unsafe_allow_html=True)
+                st.markdown("<hr style='margin: 10px 0; border: none; border-top: 1px dashed #eee;'>", unsafe_allow_html=True)
         else:
             st.info("Toutes les tâches ont été réalisées ! 🎉")
             
@@ -234,23 +305,35 @@ if st.session_state["active_tab"] == "Tâches":
             df_done_limited = df_done.head(10)
             
             for index, row in df_done_limited.iterrows():
-                col_rang_lbl, col_rang_val, col_desc, col_status, col_who, col_btn = st.columns([0.6, 1.0, 2.5, 1, 1.5, 1])
+                col_rang_val, col_desc, col_status, col_who = st.columns([2.0, 2.5, 1.0, 1.8])
                 
-                col_rang_lbl.markdown("<div style='padding-top: 5px; font-weight: bold;'>Rang</div>", unsafe_allow_html=True)
-                # Saisie modifiable du numéro de rang même pour les tâches terminées
                 raw_row_num = row.get('row_number')
                 old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
-                new_row_num = col_rang_val.number_input("Rang", min_value=1, max_value=40, value=old_row_num, key=f"row_num_done_{row.get('id')}", label_visibility="collapsed")
+                
+                try:
+                    default_idx = option_keys.index(old_row_num)
+                except ValueError:
+                    default_idx = 0
+                
+                new_row_num = col_rang_val.selectbox(
+                    "Emplacement",
+                    options=location_options,
+                    index=default_idx,
+                    format_func=lambda x: x[1],
+                    key=f"row_num_done_{row.get('id')}",
+                    label_visibility="collapsed"
+                )[0]
+                
                 if new_row_num != old_row_num:
                     try:
                         supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
-                        st.success("Rang mis à jour !")
+                        st.success("Emplacement mis à jour !")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erreur de modification du rang : {e}")
+                        st.error(f"Erreur de modification de l'emplacement : {e}")
                 
                 col_desc.write(row.get('title', ''))
-                col_status.success("Fait")
+                col_status.markdown("<div style='padding-top: 5px; color: #2e7d32; font-weight: bold;'>🟢 Fait</div>", unsafe_allow_html=True)
                 # Permet de modifier le nom en direct s'il y a eu une erreur de saisie
                 old_name = row.get('completed_by') or 'Anonyme'
                 new_name = col_who.text_input("Réalisé par", value=old_name, key=f"edit_{row.get('id')}", label_visibility="collapsed")
@@ -261,7 +344,51 @@ if st.session_state["active_tab"] == "Tâches":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erreur de mise à jour : {e}")
-                col_btn.write("")
+
+        # 3. Section Gestion Avancée
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("🛠️ Gestion avancée et modifications individuelles"):
+            st.markdown("##### Modifier l'emplacement ou supprimer des tâches en cours")
+            if not df_todo.empty:
+                for index, row in df_todo.iterrows():
+                    col_edit_desc, col_edit_loc, col_edit_del = st.columns([3.0, 2.0, 1.0])
+                    
+                    col_edit_desc.write(f"**{row.get('title', '')}**")
+                    
+                    raw_row_num = row.get('row_number')
+                    old_row_num = int(raw_row_num) if pd.notna(raw_row_num) else 1
+                    
+                    try:
+                        default_idx = option_keys.index(old_row_num)
+                    except ValueError:
+                        default_idx = 0
+                        
+                    new_row_num = col_edit_loc.selectbox(
+                        "Emplacement",
+                        options=location_options,
+                        index=default_idx,
+                        format_func=lambda x: x[1],
+                        key=f"edit_loc_todo_{row.get('id')}",
+                        label_visibility="collapsed"
+                    )[0]
+                    
+                    if new_row_num != old_row_num:
+                        try:
+                            supabase.table("tasks").update({"row_number": new_row_num}).eq("id", row.get('id')).execute()
+                            st.success("Emplacement mis à jour !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur de modification de l'emplacement : {e}")
+                            
+                    if col_edit_del.button("🗑️ Supprimer", key=f"del_todo_{row.get('id')}", use_container_width=True):
+                        try:
+                            supabase.table("tasks").delete().eq("id", row.get('id')).execute()
+                            st.success("Tâche supprimée !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur lors de la suppression : {e}")
+            else:
+                st.info("Aucune tâche en cours à modifier ou supprimer.")
 
     else:
         st.info("Aucune tâche répertoriée.")
